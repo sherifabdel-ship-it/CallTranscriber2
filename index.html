@@ -21,7 +21,7 @@
   h1{font-size:1.3rem; margin:8px 0 4px;}
   .hint{color:var(--muted); font-size:0.85rem; line-height:1.4; margin-bottom:16px;}
   label{display:block; font-size:0.85rem; color:var(--muted); margin:14px 0 6px;}
-  input[type=text], input[type=password], input[type=number], textarea{
+  input[type=password], textarea{
     width:100%; padding:10px 12px; border-radius:10px; border:1px solid var(--border);
     background:var(--panel); color:var(--text); font-size:0.95rem; font-family:inherit;
   }
@@ -30,20 +30,20 @@
     width:100%; padding:12px; border-radius:10px; border:1px dashed var(--border);
     background:var(--panel); color:var(--text); font-size:0.9rem;
   }
-  details{margin-top:10px; border:1px solid var(--border); border-radius:10px; padding:8px 12px; background:var(--panel);}
-  summary{cursor:pointer; color:var(--muted); font-size:0.85rem;}
   button{
     appearance:none; border:none; border-radius:10px; padding:12px 18px;
-    font-size:1rem; font-weight:600; cursor:pointer; margin-top:16px;
+    font-size:1rem; font-weight:600; cursor:pointer; margin-top:16px; width:100%;
   }
-  #goBtn{background:var(--accent); color:#fff; width:100%;}
+  #goBtn{background:var(--accent); color:#fff;}
   #goBtn:disabled{opacity:0.5;}
-  .actions{display:flex; gap:10px; margin-top:10px;}
-  .actions button{flex:1; background:var(--panel); color:var(--text); border:1px solid var(--border); margin-top:0;}
+  #checkBtn{background:var(--panel); color:var(--text); border:1px solid var(--border);}
   #status{min-height:1.4em; font-size:0.85rem; color:var(--muted); margin-top:12px;}
   #status.err{color:var(--danger);}
   #status.ok{color:var(--ok);}
   #result{width:100%; min-height:220px; margin-top:10px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:0.85rem; line-height:1.5;}
+  .actions{display:flex; gap:10px; margin-top:10px;}
+  .actions button{flex:1; margin-top:0; background:var(--panel); color:var(--text); border:1px solid var(--border);}
+  .resultsList button{display:block; width:100%; margin-top:6px; text-align:left; font-weight:400; font-size:0.85rem;}
   .foot{color:var(--muted); font-size:0.75rem; margin-top:28px; line-height:1.5; text-align:center;}
 </style>
 </head>
@@ -51,90 +51,46 @@
   <div class="wrap">
     <h1>Call Transcriber</h1>
     <p class="hint">
-      Transcribes calls that mix English and Egyptian Arabic, using your own Gemini API key.
-      The key and everything else stays in this browser — nothing goes anywhere except Google's API.
-      Long recordings are automatically split into pieces and transcribed one at a time.
+      Send a recording, it's transcribed on GitHub's servers (not your phone), come back for the result.
+      Your token stays in this browser only.
     </p>
 
-    <label for="apiKey">Gemini API key</label>
-    <input type="password" id="apiKey" placeholder="AIza...">
-
-    <label for="ghToken">GitHub token (for background processing - optional)</label>
+    <label for="ghToken">GitHub token</label>
     <input type="password" id="ghToken" placeholder="github_pat_...">
-
-    <details>
-      <summary>Advanced settings</summary>
-      <label for="model">Model name</label>
-      <input type="text" id="model" value="gemini-3.8-flash">
-      <label for="chunkMinutes">Split recordings longer than this into pieces (minutes)</label>
-      <input type="number" id="chunkMinutes" value="7" min="2" max="30" step="1">
-      <label for="prompt">Instructions sent to the model</label>
-      <textarea id="prompt" rows="5"></textarea>
-    </details>
 
     <label for="audioFile">Audio file</label>
     <input type="file" id="audioFile">
 
-    <button id="goBtn">Transcribe now</button>
-    <button id="bgBtn" style="background:var(--panel); color:var(--text); border:1px solid var(--border);">Send for background processing</button>
+    <button id="goBtn">Upload &amp; process</button>
 
     <div id="status"></div>
-    <textarea id="result" readonly placeholder="Your transcript will appear here."></textarea>
+
+    <button id="checkBtn">Check for finished transcripts</button>
+    <div id="resultsList" class="resultsList"></div>
+
+    <textarea id="result" readonly placeholder="A transcript you open from the list above will appear here."></textarea>
     <div class="actions">
       <button id="copyBtn">Copy</button>
       <button id="downloadBtn">Download .txt</button>
     </div>
 
-    <details style="margin-top:20px;">
-      <summary>Check background results</summary>
-      <button id="checkResultsBtn" style="width:100%;">Check for finished transcripts</button>
-      <div id="resultsList" style="margin-top:10px; font-size:0.85rem;"></div>
-    </details>
-
     <p class="foot">
-      Supported audio: mp3, wav, m4a/aac, ogg, flac, webm. Keep this tab open and the screen on
-      while it works — iOS pauses background tabs, so locking the screen or switching apps can
-      interrupt a long transcription (whatever finished before that stays in the box, though).
+      Handles files up to 100MB (plenty for a multi-hour compressed call). Processing happens entirely
+      on GitHub after upload, so you can lock your phone right after you see "Uploaded."
     </p>
   </div>
 
 <script>
-const DEFAULT_PROMPT = `Transcribe this audio recording verbatim.
-The speakers mix English and Egyptian Arabic in the same conversation (code-switching).
-Write each language as it was actually spoken: Arabic words in Arabic script, English words in English — do not translate anything.
-Label speakers as "Speaker 1", "Speaker 2", etc., based on distinct voices, and start a new line each time the speaker changes.
-Add an approximate timestamp like [00:30] at the start of each new speaker turn if you can tell.
-If a word or phrase is unclear, write [inaudible] rather than guessing.`;
-
 const $ = (id) => document.getElementById(id);
-const apiKeyEl = $('apiKey'), ghTokenEl = $('ghToken'), modelEl = $('model'), chunkMinutesEl = $('chunkMinutes'), promptEl = $('prompt'),
-      fileEl = $('audioFile'), goBtn = $('goBtn'), bgBtn = $('bgBtn'), statusEl = $('status'),
-      resultEl = $('result'), copyBtn = $('copyBtn'), downloadBtn = $('downloadBtn'),
-      checkResultsBtn = $('checkResultsBtn'), resultsListEl = $('resultsList');
+const ghTokenEl = $('ghToken'), fileEl = $('audioFile'), goBtn = $('goBtn'), statusEl = $('status'),
+      checkBtn = $('checkBtn'), resultsListEl = $('resultsList'),
+      resultEl = $('result'), copyBtn = $('copyBtn'), downloadBtn = $('downloadBtn');
 
-// --- persist simple settings locally (best-effort; app still works if storage is blocked) ---
-function loadSaved(){
-  try{
-    apiKeyEl.value = localStorage.getItem('ct_api_key') || '';
-    ghTokenEl.value = localStorage.getItem('ct_gh_token') || '';
-    modelEl.value = localStorage.getItem('ct_model') || 'gemini-3.8-flash';
-    chunkMinutesEl.value = localStorage.getItem('ct_chunk_minutes') || '7';
-    promptEl.value = localStorage.getItem('ct_prompt') || DEFAULT_PROMPT;
-  }catch(e){
-    promptEl.value = DEFAULT_PROMPT;
-  }
-}
-function saveSetting(key, val){
-  try{ localStorage.setItem(key, val); }catch(e){ /* ignore */ }
-}
-apiKeyEl.addEventListener('change', () => saveSetting('ct_api_key', apiKeyEl.value.trim()));
-ghTokenEl.addEventListener('change', () => saveSetting('ct_gh_token', ghTokenEl.value.trim()));
-modelEl.addEventListener('change', () => saveSetting('ct_model', modelEl.value.trim()));
-chunkMinutesEl.addEventListener('change', () => saveSetting('ct_chunk_minutes', chunkMinutesEl.value));
-promptEl.addEventListener('change', () => saveSetting('ct_prompt', promptEl.value));
-loadSaved();
+try{ ghTokenEl.value = localStorage.getItem('ct_gh_token') || ''; }catch(e){ /* ignore */ }
+ghTokenEl.addEventListener('change', () => {
+  try{ localStorage.setItem('ct_gh_token', ghTokenEl.value.trim()); }catch(e){ /* ignore */ }
+});
 
-// repo owner/name is just read off the page's own URL (https://<owner>.github.io/<repo>/...)
 function detectRepo(){
   const owner = location.hostname.split('.')[0];
   const repo = (location.pathname.split('/').filter(Boolean)[0]) || '';
@@ -144,43 +100,6 @@ function detectRepo(){
 function setStatus(msg, kind){
   statusEl.textContent = msg || '';
   statusEl.className = kind || '';
-}
-function setBusy(isBusy){
-  goBtn.disabled = isBusy;
-  goBtn.textContent = isBusy ? 'Working...' : 'Transcribe';
-}
-
-const MAX_INLINE_BYTES = 14 * 1024 * 1024; // safe margin under the 20MB request limit after base64 overhead
-const MAX_DECODE_SECONDS = 20 * 60; // don't attempt in-browser decoding beyond this - risks crashing the tab on iPhone
-
-// --- screen wake lock: best-effort, keeps the screen from auto-sleeping while we work ---
-let wakeLock = null;
-async function requestWakeLock(){
-  try{
-    if ('wakeLock' in navigator){
-      wakeLock = await navigator.wakeLock.request('screen');
-      wakeLock.addEventListener('release', () => { wakeLock = null; });
-    }
-  }catch(e){ console.warn('wake lock unavailable', e); }
-}
-function releaseWakeLock(){
-  try{ if (wakeLock){ wakeLock.release(); wakeLock = null; } }catch(e){ /* ignore */ }
-}
-document.addEventListener('visibilitychange', async () => {
-  if (document.visibilityState === 'visible' && goBtn.disabled && !wakeLock){
-    await requestWakeLock();
-  }
-});
-
-function guessMime(file){
-  if (file.type) return file.type;
-  const ext = (file.name.split('.').pop() || '').toLowerCase();
-  const map = {
-    mp3:'audio/mpeg', wav:'audio/wav', m4a:'audio/mp4', mp4:'audio/mp4',
-    aac:'audio/aac', ogg:'audio/ogg', oga:'audio/ogg', flac:'audio/flac',
-    webm:'audio/webm', amr:'audio/amr', '3gp':'audio/3gpp'
-  };
-  return map[ext] || 'application/octet-stream';
 }
 
 function fileToBase64(file){
@@ -192,334 +111,19 @@ function fileToBase64(file){
   });
 }
 
-function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
-
-// --- cheap duration check (no full decode) ---
-function getAudioDuration(file){
-  return new Promise((resolve, reject) => {
-    const url = URL.createObjectURL(file);
-    const audio = document.createElement('audio');
-    audio.preload = 'metadata';
-    audio.onloadedmetadata = () => {
-      const d = audio.duration;
-      URL.revokeObjectURL(url);
-      resolve(d);
-    };
-    audio.onerror = () => { URL.revokeObjectURL(url); reject(new Error('metadata-failed')); };
-    audio.src = url;
-  });
-}
-
-// --- full decode, only used for files long enough to need splitting ---
-async function decodeFile(file){
-  const buf = await file.arrayBuffer();
-  const Ctx = window.AudioContext || window.webkitAudioContext;
-  const ctx = new Ctx();
-  try{
-    return await ctx.decodeAudioData(buf);
-  }finally{
-    ctx.close();
-  }
-}
-
-function splitIntoChunks(totalSeconds, chunkSeconds){
-  const ranges = [];
-  let start = 0;
-  while (start < totalSeconds - 0.25){
-    const end = Math.min(totalSeconds, start + chunkSeconds);
-    ranges.push({ start, end });
-    start = end;
-  }
-  return ranges;
-}
-
-// resample+mixdown one time range of an AudioBuffer down to a small mono WAV Blob
-async function sliceToWavBlob(audioBuffer, startSec, endSec, targetRate){
-  const srcRate = audioBuffer.sampleRate;
-  const startSample = Math.floor(startSec * srcRate);
-  const endSample = Math.min(audioBuffer.length, Math.ceil(endSec * srcRate));
-  const frameCount = Math.max(0, endSample - startSample);
-  if (frameCount === 0) return encodeWav(new Float32Array(0), targetRate);
-
-  const channels = audioBuffer.numberOfChannels;
-  const sub = new Float32Array(frameCount);
-  for (let ch = 0; ch < channels; ch++){
-    const data = audioBuffer.getChannelData(ch);
-    for (let i = 0; i < frameCount; i++){
-      sub[i] += data[startSample + i] / channels;
-    }
-  }
-
-  const OfflineCtx = window.OfflineAudioContext || window.webkitOfflineAudioContext;
-  const outLength = Math.max(1, Math.ceil(frameCount * targetRate / srcRate));
-  const offline = new OfflineCtx(1, outLength, targetRate);
-  const tmpBuffer = offline.createBuffer(1, frameCount, srcRate);
-  if (tmpBuffer.copyToChannel) tmpBuffer.copyToChannel(sub, 0);
-  else tmpBuffer.getChannelData(0).set(sub);
-
-  const src = offline.createBufferSource();
-  src.buffer = tmpBuffer;
-  src.connect(offline.destination);
-  src.start(0);
-  const rendered = await offline.startRendering();
-  return encodeWav(rendered.getChannelData(0), targetRate);
-}
-
-function encodeWav(samples, sampleRate){
-  const numFrames = samples.length;
-  const bytesPerSample = 2;
-  const byteRate = sampleRate * bytesPerSample;
-  const dataSize = numFrames * bytesPerSample;
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  function writeString(offset, str){
-    for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
-  }
-
-  writeString(0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true);
-  writeString(8, 'WAVE');
-  writeString(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, bytesPerSample, true);
-  view.setUint16(34, 16, true);
-  writeString(36, 'data');
-  view.setUint32(40, dataSize, true);
-
-  let offset = 44;
-  for (let i = 0; i < numFrames; i++, offset += 2){
-    const s = Math.max(-1, Math.min(1, samples[i]));
-    view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7fff, true);
-  }
-
-  return new Blob([buffer], { type: 'audio/wav' });
-}
-
-function mmss(s){
-  s = Math.max(0, Math.round(s));
-  return String(Math.floor(s / 60)).padStart(2, '0') + ':' + String(s % 60).padStart(2, '0');
-}
-
-function buildChunkPrompt(basePrompt, index, total, range){
-  return basePrompt +
-    `\n\nThis is part ${index + 1} of ${total} of a longer call (covers roughly ${mmss(range.start)}-${mmss(range.end)} of the original recording). ` +
-    `Transcribe only this segment. Do not add a summary or preamble, just the transcript for this segment. ` +
-    `Speaker numbering does not need to match other parts.`;
-}
-
-function formatChunkHeader(index, total, range){
-  return `\n----- Part ${index + 1}/${total} (${mmss(range.start)}-${mmss(range.end)}) -----\n`;
-}
-
-// each chunk's model output has its own [MM:SS] tags starting back at 0;
-// shift them by the chunk's start offset so timestamps read continuously across the whole call
-function shiftTimestamps(text, offsetSeconds){
-  return text.replace(/\[(\d{1,2}):(\d{2})(?::(\d{2}))?\]/g, (match, a, b, c) => {
-    let secs;
-    if (c !== undefined){
-      secs = parseInt(a, 10) * 3600 + parseInt(b, 10) * 60 + parseInt(c, 10);
-    }else{
-      secs = parseInt(a, 10) * 60 + parseInt(b, 10);
-    }
-    return '[' + mmss(secs + offsetSeconds) + ']';
-  });
-}
-
-// --- Files API upload (handles long recordings; falls back to inline if this fails) ---
-async function uploadFile(file, apiKey){
-  const mimeType = guessMime(file);
-  const startRes = await fetch(
-    `https://generativelanguage.googleapis.com/upload/v1beta/files?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST',
-      headers: {
-        'X-Goog-Upload-Protocol': 'resumable',
-        'X-Goog-Upload-Command': 'start',
-        'X-Goog-Upload-Header-Content-Length': String(file.size),
-        'X-Goog-Upload-Header-Content-Type': mimeType,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ file: { display_name: file.name } })
-    }
-  );
-  if (!startRes.ok) throw new Error('upload-start-failed:' + startRes.status);
-  const uploadUrl = startRes.headers.get('x-goog-upload-url');
-  if (!uploadUrl) throw new Error('no-upload-url');
-
-  const uploadRes = await fetch(uploadUrl, {
-    method: 'POST',
-    headers: {
-      'X-Goog-Upload-Offset': '0',
-      'X-Goog-Upload-Command': 'upload, finalize'
-    },
-    body: file
-  });
-  if (!uploadRes.ok) throw new Error('upload-failed:' + uploadRes.status);
-  const data = await uploadRes.json();
-  if (!data.file || !data.file.uri) throw new Error('upload-no-file-info');
-  return { uri: data.file.uri, name: data.file.name, mimeType };
-}
-
-async function waitForActive(fileName, apiKey){
-  for (let i = 0; i < 60; i++){
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/${fileName}?key=${encodeURIComponent(apiKey)}`);
-    if (res.ok){
-      const data = await res.json();
-      if (data.state === 'ACTIVE') return;
-      if (data.state === 'FAILED') throw new Error('file-processing-failed');
-    }
-    await sleep(3000);
-  }
-  throw new Error('file-processing-timeout');
-}
-
-async function generateFromFileUri(fileUri, mimeType, apiKey, model, prompt){
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { text: prompt },
-          { file_data: { mime_type: mimeType, file_uri: fileUri } }
-        ]}]
-      })
-    }
-  );
-  return extractText(res);
-}
-
-async function generateInline(file, mimeType, apiKey, model, prompt){
-  const base64 = await fileToBase64(file);
-  const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [{ parts: [
-          { text: prompt },
-          { inline_data: { mime_type: mimeType, data: base64 } }
-        ]}]
-      })
-    }
-  );
-  return extractText(res);
-}
-
-async function extractText(res){
-  const raw = await res.text();
-  let data;
-  try{ data = JSON.parse(raw); }catch(e){ throw new Error('Unexpected response: ' + raw.slice(0, 300)); }
-  if (!res.ok){
-    const msg = (data && data.error && data.error.message) || res.status;
-    throw new Error('API error: ' + msg);
-  }
-  const parts = data && data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts;
-  if (!parts) return '(No text returned. Raw response: ' + raw.slice(0, 300) + ')';
-  return parts.map(p => p.text || '').join('\n').trim();
-}
-
-// upload+transcribe one file (chunk or whole recording), with inline fallback for small files
-async function transcribeOneFile(file, apiKey, model, prompt){
-  try{
-    const { uri, name, mimeType } = await uploadFile(file, apiKey);
-    await waitForActive(name, apiKey);
-    return await generateFromFileUri(uri, mimeType, apiKey, model, prompt);
-  }catch(err){
-    console.error(err);
-    if (file.size <= MAX_INLINE_BYTES){
-      const mimeType = guessMime(file);
-      return await generateInline(file, mimeType, apiKey, model, prompt);
-    }
-    throw err;
-  }
-}
-
-async function handleTranscribe(){
-  const apiKey = apiKeyEl.value.trim();
-  const model = (modelEl.value || 'gemini-3.8-flash').trim();
-  const prompt = promptEl.value.trim() || DEFAULT_PROMPT;
-  const chunkSeconds = Math.max(120, (parseFloat(chunkMinutesEl.value) || 7) * 60);
-  const file = fileEl.files[0];
-
-  if (!apiKey){ setStatus('Paste your Gemini API key first.', 'err'); return; }
-  if (!file){ setStatus('Pick an audio file first.', 'err'); return; }
-
-  setBusy(true);
-  resultEl.value = '';
-  await requestWakeLock();
-
-  const MAX_PROBE_BYTES = 25 * 1024 * 1024; // skip even reading metadata for files this big - avoid touching them in-browser at all
-
-  try{
-    let duration = null;
-    if (file.size <= MAX_PROBE_BYTES){
-      try{ duration = await getAudioDuration(file); }catch(e){ duration = null; }
-    }
-
-    if (duration && isFinite(duration) && duration > chunkSeconds * 1.1 && duration <= MAX_DECODE_SECONDS){
-      try{
-        setStatus('Reading and splitting audio locally...');
-        const audioBuffer = await decodeFile(file);
-        const ranges = splitIntoChunks(audioBuffer.duration, chunkSeconds);
-
-        for (let i = 0; i < ranges.length; i++){
-          setStatus(`Chunk ${i + 1} of ${ranges.length}: preparing audio...`);
-          const wavBlob = await sliceToWavBlob(audioBuffer, ranges[i].start, ranges[i].end, 16000);
-          const chunkFile = new File([wavBlob], `chunk-${i + 1}.wav`, { type: 'audio/wav' });
-
-          setStatus(`Chunk ${i + 1} of ${ranges.length}: transcribing...`);
-          const chunkPrompt = buildChunkPrompt(prompt, i, ranges.length, ranges[i]);
-          const text = await transcribeOneFile(chunkFile, apiKey, model, chunkPrompt);
-          const shiftedText = shiftTimestamps(text, ranges[i].start);
-
-          resultEl.value += formatChunkHeader(i, ranges.length, ranges[i]) + shiftedText + '\n';
-          setStatus(`Chunk ${i + 1} of ${ranges.length} done.`, 'ok');
-        }
-
-        setStatus('All chunks done.', 'ok');
-        return;
-      }catch(splitErr){
-        console.error('splitting failed, falling back to single pass', splitErr);
-        setStatus('Could not split this file in the browser - processing it as one piece instead (this can take a while)...');
-      }
-    }
-
-    const isLong = (duration && duration > MAX_DECODE_SECONDS) || file.size > MAX_PROBE_BYTES;
-    const longNote = isLong ? ' (long recording - this can take several minutes, keep this tab open)' : '';
-    setStatus('Uploading and transcribing...' + longNote);
-    const text = await transcribeOneFile(file, apiKey, model, prompt);
-    resultEl.value = text;
-    setStatus('Done.', 'ok');
-  }catch(err){
-    console.error(err);
-    setStatus('Error: ' + err.message, 'err');
-  }finally{
-    setBusy(false);
-    releaseWakeLock();
-  }
-}
-
-async function sendForBackgroundProcessing(){
+async function uploadAndProcess(){
   const token = ghTokenEl.value.trim();
   const file = fileEl.files[0];
   const { owner, repo } = detectRepo();
 
-  if (!token){ setStatus('Paste your GitHub token first (Advanced settings area above).', 'err'); return; }
+  if (!token){ setStatus('Paste your GitHub token first.', 'err'); return; }
   if (!file){ setStatus('Pick an audio file first.', 'err'); return; }
   if (!owner || !repo){ setStatus('Could not detect the repo from this page\'s URL.', 'err'); return; }
+  if (file.size > 100 * 1024 * 1024){ setStatus('This file is over 100MB - GitHub can\'t take it this way. Compress or split it first.', 'err'); return; }
 
-  bgBtn.disabled = true;
   goBtn.disabled = true;
   try{
-    setStatus('Encoding and uploading to GitHub...');
+    setStatus('Encoding and uploading...');
     const base64 = await fileToBase64(file);
     const stamp = new Date().toISOString().replace(/[:.]/g, '-');
     const safeName = file.name.replace(/[^A-Za-z0-9._-]/g, '_');
@@ -543,14 +147,13 @@ async function sendForBackgroundProcessing(){
     );
     if (!res.ok){
       const errText = await res.text();
-      throw new Error(`GitHub upload failed (${res.status}): ${errText.slice(0, 200)}`);
+      throw new Error(`Upload failed (${res.status}): ${errText.slice(0, 200)}`);
     }
-    setStatus('Uploaded. Processing starts automatically on GitHub - check back in a few minutes with "Check for finished transcripts" below. You can lock your phone now.', 'ok');
+    setStatus('Uploaded. Processing starts automatically - check back in a few minutes and tap "Check for finished transcripts". You can lock your phone now.', 'ok');
   }catch(err){
     console.error(err);
     setStatus('Error: ' + err.message, 'err');
   }finally{
-    bgBtn.disabled = false;
     goBtn.disabled = false;
   }
 }
@@ -572,9 +175,6 @@ async function checkResults(){
     textFiles.forEach(item => {
       const btn = document.createElement('button');
       btn.textContent = item.name;
-      btn.style.display = 'block';
-      btn.style.width = '100%';
-      btn.style.marginTop = '6px';
       btn.addEventListener('click', async () => {
         try{
           const r = await fetch(item.download_url);
@@ -592,10 +192,8 @@ async function checkResults(){
   }
 }
 
-bgBtn.addEventListener('click', sendForBackgroundProcessing);
-checkResultsBtn.addEventListener('click', checkResults);
-
-goBtn.addEventListener('click', handleTranscribe);
+goBtn.addEventListener('click', uploadAndProcess);
+checkBtn.addEventListener('click', checkResults);
 
 copyBtn.addEventListener('click', async () => {
   if (!resultEl.value) return;

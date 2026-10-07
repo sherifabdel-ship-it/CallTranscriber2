@@ -1,0 +1,42 @@
+name: Transcribe call
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'incoming/**'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: transcribe-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  transcribe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Transcribe new recordings
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        run: python scripts/transcribe.py
+
+      - name: Commit results
+        run: |
+          git config user.name "call-transcriber-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add transcripts incoming
+          git diff --cached --quiet || git commit -m "Transcribe recording(s) [skip ci]"
+          git push
